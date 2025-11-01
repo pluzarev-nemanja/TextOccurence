@@ -1,16 +1,44 @@
 package org.example
 
-//TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
-// click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
-fun main() {
-    val name = "Kotlin"
-    //TIP Press <shortcut actionId="ShowIntentionActions"/> with your caret at the highlighted text
-    // to see how IntelliJ IDEA suggests fixing it.
-    println("Hello, " + name + "!")
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import java.nio.file.Files
+import java.nio.file.Path
 
-    for (i in 1..5) {
-        //TIP Press <shortcut actionId="Debug"/> to start debugging your code. We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-        // for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.
-        println("i = $i")
-    }
+interface Occurrence {
+    val file: Path
+    val line: Int
+    val offset: Int
 }
+
+data class OccurrenceImpl(
+    override val file: Path,
+    override val line: Int,
+    override val offset: Int
+) : Occurrence
+
+fun searchForTextOccurrences(
+    stringToSearch: String,
+    directory: Path
+): Flow<Occurrence> = channelFlow {
+    require(Files.isDirectory(directory)) { "Path must be a directory: $directory" }
+    require(stringToSearch.isNotEmpty()) { "Search string cannot be empty" }
+    Files.walk(directory).use { paths ->
+        paths.filter { Files.isRegularFile(it) && Files.isReadable(it) }.forEach { file ->
+            launch(Dispatchers.IO) {
+                Files.newBufferedReader(file).useLines { lines ->
+                    lines.forEachIndexed { lineIndex, line ->
+                        var searchIndex = line.indexOf(stringToSearch)
+                        while (searchIndex >= 0) {
+                            send(OccurrenceImpl(file, lineIndex + 1, searchIndex))
+                            searchIndex = line.indexOf(stringToSearch, searchIndex + 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}.flowOn(Dispatchers.IO)
